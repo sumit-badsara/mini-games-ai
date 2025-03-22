@@ -628,71 +628,87 @@ const CityMap = () => {
 };
 
 const MapEnvironment = ({ mapType = 'desert', position = [0, 0, 0] }) => {
-  // Create a physics plane for the ground - explicitly at y=0 with zero friction
-  const [groundRef] = usePlane(() => ({
-    rotation: [-Math.PI / 2, 0, 0], // rotate to be flat
-    position: [0, 0, 0], // Always at y=0 to ensure consistent physics
-    type: 'static', // ground doesn't move
+  // Create physics plane for the ground
+  const [ref, api] = usePlane(() => ({
+    mass: 0, // Static (immovable) ground
+    position: [0, 0, 0], // Flat ground at y=0
+    rotation: [-Math.PI / 2, 0, 0], // Face upward
+    type: 'Static',
     material: {
-      friction: 0, // Zero friction for perfect ground movement
-      restitution: 0.1 // Lower restitution for more predictable jumping
+      friction: 0, // No friction for smoother movement
+      restitution: 0.1 // Slight bounce for better jump feel
+    },
+    userData: { id: 'ground' }, // Tag to identify in collision callbacks
+    onCollide: (e) => {
+      // Log ground collisions for debugging
+      if (e.body.userData?.isPlayer) {
+        console.log("Ground collision detected in MapEnvironment");
+      }
     }
   }));
 
-  // Create physical boundary walls with thicker collision areas
-  const [northWall] = useBox(() => ({
-    position: [0, 5, -50], 
-    args: [100, 10, 2], // Thicker collision box
-    type: 'static',
+  // Physics boundaries for the map - keep player from falling off edges
+  const [northWall, northWallApi] = useBox(() => ({
+    args: [100, 10, 2], // Width, height, depth
+    position: [0, 5, -50], // North wall
+    type: 'Static',
+    material: { friction: 0 } // No friction on walls
   }));
   
-  const [southWall] = useBox(() => ({
-    position: [0, 5, 50],
+  const [southWall, southWallApi] = useBox(() => ({
     args: [100, 10, 2],
-    type: 'static',
+    position: [0, 5, 50], // South wall
+    type: 'Static',
+    material: { friction: 0 }
   }));
   
-  const [eastWall] = useBox(() => ({
-    position: [50, 5, 0],
+  const [eastWall, eastWallApi] = useBox(() => ({
     args: [2, 10, 100],
-    type: 'static',
+    position: [50, 5, 0], // East wall
+    type: 'Static',
+    material: { friction: 0 }
   }));
   
-  const [westWall] = useBox(() => ({
-    position: [-50, 5, 0],
+  const [westWall, westWallApi] = useBox(() => ({
     args: [2, 10, 100],
-    type: 'static',
+    position: [-50, 5, 0], // West wall 
+    type: 'Static',
+    material: { friction: 0 }
   }));
   
-  // Add corner collision boxes
-  const [neCorner] = useBox(() => ({
-    position: [50, 5, -50],
+  // Corner collision boxes to prevent getting stuck in corners
+  const [neCorner, neCornerApi] = useBox(() => ({
     args: [2, 10, 2],
-    type: 'static',
+    position: [50, 5, -50], // Northeast corner
+    type: 'Static',
+    material: { friction: 0 }
   }));
   
-  const [nwCorner] = useBox(() => ({
-    position: [-50, 5, -50],
+  const [nwCorner, nwCornerApi] = useBox(() => ({
     args: [2, 10, 2],
-    type: 'static',
+    position: [-50, 5, -50], // Northwest corner
+    type: 'Static',
+    material: { friction: 0 }
   }));
   
-  const [seCorner] = useBox(() => ({
-    position: [50, 5, 50],
+  const [seCorner, seCornerApi] = useBox(() => ({
     args: [2, 10, 2],
-    type: 'static',
+    position: [50, 5, 50], // Southeast corner
+    type: 'Static',
+    material: { friction: 0 }
   }));
   
-  const [swCorner] = useBox(() => ({
-    position: [-50, 5, 50],
+  const [swCorner, swCornerApi] = useBox(() => ({
     args: [2, 10, 2],
-    type: 'static',
+    position: [-50, 5, 50], // Southwest corner
+    type: 'Static',
+    material: { friction: 0 }
   }));
 
   return (
     <group>
       {/* Physics plane for collision detection - invisible */}
-      <mesh ref={groundRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} visible={false}>
+      <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} visible={false}>
         <planeGeometry args={[100, 100]} />
         <meshStandardMaterial color="#000000" transparent={false} opacity={1} />
       </mesh>

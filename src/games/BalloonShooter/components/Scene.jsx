@@ -143,6 +143,10 @@ const PlayerController = () => {
     linearDamping: 0, // No air resistance for smoother air movement
     fixedRotation: true, // Don't rotate the player
     sleepSpeedLimit: 0.01, // Performance optimization
+    userData: { 
+      isPlayer: true, 
+      id: 'player' 
+    }, // Identify player in collision callbacks
     onCollide: (e) => {
       // When player collides with an object
       if (e.contact.bi.id === playerRef.current?.uuid || e.contact.bj.id === playerRef.current?.uuid) {
@@ -156,6 +160,15 @@ const PlayerController = () => {
           lastJumpTime.current = 0; // Reset jump cooldown
           canJump.current = true;
           console.log("Ground collision detected"); // Debug log
+          
+          // Update movement state for gun
+          if (movementState.current.isJumping) {
+            movementState.current = {
+              ...movementState.current,
+              isJumping: false,
+              lastUpdateTime: performance.now()
+            };
+          }
         }
       }
     }
@@ -166,7 +179,7 @@ const PlayerController = () => {
   const keys = useRef({});
   const baseSpeed = 5.5; // Base movement force
   const sprintSpeed = 9.0; // Sprint movement force
-  const jumpForce = 12; // Increased jump force for more satisfying jumps
+  const jumpForce = 14; // Increased jump force for more satisfying jumps
   
   // Jump control and ground detection refs
   const isOnGround = useRef(false);
@@ -174,12 +187,24 @@ const PlayerController = () => {
   const lastJumpTime = useRef(0);
   const isSprinting = useRef(false);
   const jumpCooldown = 250; // ms before allowing another jump (prevents rapid jump spam)
+  const jumpPressed = useRef(false); // Track if jump key is currently pressed
   
   // Position tracker for debugging
   const position = useRef([0, 0, 0]);
+
+  // Movement state for the gun to use
+  const movementState = useRef({
+    isMoving: false,
+    isSprinting: false,
+    isJumping: false,
+    velocityMagnitude: 0,
+    movementDirection: new THREE.Vector3(0, 0, 0),
+    lastUpdateTime: 0
+  });
   
   // Ground check timer to periodically reset jump ability if stuck
   const groundCheckTimer = useRef(null);
+  const emergencyJumpTimer = useRef(null);
   
   // Set up keyboard controls
   useEffect(() => {
@@ -191,20 +216,45 @@ const PlayerController = () => {
       if (p[1] <= 0.6) {
         isOnGround.current = true;
         canJump.current = true;
+        
+        // Also update movement state for gun consistency
+        if (movementState.current.isJumping) {
+          movementState.current = {
+            ...movementState.current,
+            isJumping: false,
+            lastUpdateTime: performance.now()
+          };
+        }
       }
     });
     
     const unsubscribeVelocity = api.velocity.subscribe((v) => {
       velocity.current = v;
       
+      // Update movement state for gun
+      const currentTime = performance.now();
+      const velocityXZ = Math.sqrt(v[0] * v[0] + v[2] * v[2]);
+      
+      movementState.current = {
+        ...movementState.current,
+        isMoving: velocityXZ > 0.5,
+        velocityMagnitude: velocityXZ,
+        lastUpdateTime: currentTime
+      };
+      
       // If falling very slowly or moving upward very slowly, probably on ground
       if (Math.abs(v[1]) < 0.2) {
         isOnGround.current = true;
+        // Update jump state if we were jumping
+        if (movementState.current.isJumping) {
+          movementState.current.isJumping = false;
+        }
       }
       
       // If moving upwards significantly, definitely not on ground
       if (v[1] > 2) {
         isOnGround.current = false;
+        movementState.current.isJumping = true;
       }
     });
     
@@ -214,65 +264,120 @@ const PlayerController = () => {
       if (position.current[1] <= 0.55 && performance.now() - lastJumpTime.current > 500) {
         isOnGround.current = true; 
         canJump.current = true;
+        
+        // Make sure movement state is consistent
+        if (movementState.current.isJumping) {
+          movementState.current.isJumping = false;
+        }
       }
-    }, 1000);
+      
+      // Check if player appears stuck (on ground but can't jump)
+      if (position.current[1] <= 0.6 && 
+          !canJump.current && 
+          performance.now() - lastJumpTime.current > 1000) {
+        console.log("Emergency jump reset");
+        canJump.current = true;
+        isOnGround.current = true;
+      }
+    }, 500); // Check more frequently
+    
+    // Set up emergency timer to allow jump if key is held
+    emergencyJumpTimer.current = setInterval(() => {
+      // If jump key is being held down and we're near the ground but not jumping
+      if (jumpPressed.current && 
+          position.current[1] <= 0.6 && 
+          performance.now() - lastJumpTime.current > 1000) {
+        console.log("Emergency jump triggered by key hold");
+        canJump.current = true;
+        isOnGround.current = true;
+      }
+    }, 200);
     
     const handleKeyDown = (e) => {
       keys.current[e.code] = true;
       
-      // Set sprinting when Shift is pressed
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
-        isSprinting.current = true;
+      // Jump handling
+      if (e.code === 'Space' || e.code === 'KeyJ') {
+        jumpPressed.current = true;
+        
+        // Normal jump if conditions are met
+        if (canJump.current && isOnGround.current) {
+          console.log("Jump initiated", isOnGround.current, canJump.current);
+          canJump.current = false;
+          isOnGround.current = false;
+          lastJumpTime.current = performance.now();
+          
+          // Apply a small upward impulse at first to ensure getting off the ground
+          api.velocity.set(velocity.current[0], 1.0, velocity.current[2]);
+          
+          // Then apply the main jump force after a very short delay
+          setTimeout(() => {
+            api.velocity.set(velocity.current[0], jumpForce, velocity.current[2]);
+            console.log("Jump force applied", jumpForce); // Debug log
+          }, 10);
+          
+          // Update movement state for gun
+          movementState.current = {
+            ...movementState.current,
+            isJumping: true,
+            lastUpdateTime: performance.now()
+          };
+        } 
+        // Emergency jump if we seem stuck
+        else if (position.current[1] <= 0.55 && performance.now() - lastJumpTime.current > 800) {
+          console.log("Emergency jump triggered");
+          canJump.current = false;
+          isOnGround.current = false;
+          lastJumpTime.current = performance.now();
+          
+          // Apply a stronger impulse for emergency jumps to escape any stuck states
+          api.velocity.set(velocity.current[0], 1.5, velocity.current[2]);
+          
+          setTimeout(() => {
+            api.velocity.set(velocity.current[0], jumpForce + 2, velocity.current[2]);
+            console.log("Emergency jump force applied", jumpForce + 2);
+          }, 10);
+          
+          // Update movement state for gun
+          movementState.current = {
+            ...movementState.current,
+            isJumping: true,
+            lastUpdateTime: performance.now()
+          };
+        }
       }
       
-      // Jump when spacebar is pressed
-      if (e.code === 'Space') {
-        const now = performance.now();
+      // Sprint handling
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        isSprinting.current = true;
         
-        // Alternative emergency jump if player is stuck
-        if (position.current[1] <= 0.55 && now - lastJumpTime.current > 1000) {
-          // Force a jump if we're clearly on the ground but jump state is wrong
-          console.log("Emergency jump triggered"); // Debug log
-          
-          // Apply jump force with a technique to "unstick" from ground first
-          // First apply a small upward velocity as a pre-jump
-          api.velocity.set(velocity.current[0], 0.5, velocity.current[2]);
-          
-          // Then apply the main jump force after a tiny delay
-          setTimeout(() => {
-            api.velocity.set(velocity.current[0], jumpForce, velocity.current[2]);
-            isOnGround.current = false;
-            lastJumpTime.current = now;
-          }, 10);
-          
-          return;
-        }
-        
-        // Normal jump logic
-        if (isOnGround.current && canJump.current && now - lastJumpTime.current > jumpCooldown) {
-          console.log("Normal jump triggered"); // Debug log
-          
-          // Apply jump force with a technique to "unstick" from ground first
-          // First apply a small upward velocity as a pre-jump
-          api.velocity.set(velocity.current[0], 0.5, velocity.current[2]);
-          
-          // Then apply the main jump force after a tiny delay
-          setTimeout(() => {
-            api.velocity.set(velocity.current[0], jumpForce, velocity.current[2]);
-            isOnGround.current = false;
-            canJump.current = false;
-            lastJumpTime.current = now;
-          }, 10);
-        }
+        // Update movement state for gun
+        movementState.current = {
+          ...movementState.current,
+          isSprinting: true,
+          lastUpdateTime: performance.now()
+        };
       }
     };
     
     const handleKeyUp = (e) => {
       keys.current[e.code] = false;
       
+      // Track jump key release
+      if (e.code === 'Space' || e.code === 'KeyJ') {
+        jumpPressed.current = false;
+      }
+      
       // Reset sprinting when Shift is released
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
         isSprinting.current = false;
+        
+        // Update movement state for gun
+        movementState.current = {
+          ...movementState.current,
+          isSprinting: false,
+          lastUpdateTime: performance.now()
+        };
       }
     };
     
@@ -286,6 +391,9 @@ const PlayerController = () => {
       unsubscribeVelocity();
       if (groundCheckTimer.current) {
         clearInterval(groundCheckTimer.current);
+      }
+      if (emergencyJumpTimer.current) {
+        clearInterval(emergencyJumpTimer.current);
       }
     };
   }, [api]);
@@ -316,6 +424,11 @@ const PlayerController = () => {
       .normalize()
       .multiplyScalar(currentSpeed);
     
+    // Update movement direction for gun
+    if (direction.lengthSq() > 0) {
+      movementState.current.movementDirection.copy(direction);
+    }
+    
     // Rotate movement vector based on camera rotation
     direction.applyEuler(camera.rotation);
     
@@ -340,6 +453,15 @@ const PlayerController = () => {
     if (position.current[1] <= 0.6 && velocity.current[1] <= 0.1) {
       isOnGround.current = true; 
       canJump.current = true;
+      
+      // Update jump state for gun
+      if (movementState.current.isJumping) {
+        movementState.current = {
+          ...movementState.current,
+          isJumping: false,
+          lastUpdateTime: performance.now()
+        };
+      }
     }
   });
   
@@ -355,6 +477,9 @@ const PlayerController = () => {
       camera.position.z = position.z;
     }
   });
+  
+  // Make player movement state available via a ref for external access (like Gun)
+  PlayerController.playerMovementState = movementState;
   
   // Make invisible mesh for physics
   return (
@@ -769,7 +894,12 @@ const Scene = ({ selectedGun = 'pistol', selectedMap = 'desert' }) => {
   }, [gameOver]);
 
   return (
-    <Physics gravity={[0, -20, 0]} defaultContactMaterial={{ friction: 0, restitution: 0.1 }}>
+    <Physics 
+      gravity={[0, -20, 0]} 
+      defaultContactMaterial={{ friction: 0, restitution: 0.1 }}
+      iterations={8} // More physics iterations for better stability
+      tolerance={0.001} // Higher precision
+    >
       {/* Player physics body with movement and jumping */}
       <PlayerController />
       
@@ -793,6 +923,7 @@ const Scene = ({ selectedGun = 'pistol', selectedMap = 'desert' }) => {
       {/* Gun - positioned relative to the camera */}
       <Gun 
         gunType={selectedGun} 
+        playerMovementState={PlayerController.playerMovementState}
         onShoot={(mainRaycaster, spreadRaycasters) => {
           try {
             // Play shoot sound - wrap in try/catch to prevent hanging

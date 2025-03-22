@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import GunModel from './GunModel';
 
 // Gun component with support for different gun types
-const Gun = ({ onShoot, gunType = 'pistol' }) => {
+const Gun = ({ onShoot, gunType = 'pistol', playerMovementState }) => {
   const group = useRef();
   const { camera, gl } = useThree();
   const [shooting, setShooting] = useState(false);
@@ -20,6 +20,12 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
   const lastCameraPosition = useRef(new THREE.Vector3());
   const lastCameraQuaternion = useRef(new THREE.Quaternion());
   
+  // Swaying and bobbing effects
+  const swayOffset = useRef(new THREE.Vector3(0, 0, 0));
+  const bobOffset = useRef(new THREE.Vector3(0, 0, 0));
+  const lastMovementTime = useRef(0);
+  const bobCycle = useRef(0);
+  
   // Gun properties based on type - memoized to prevent recalculation
   const gunProperties = useMemo(() => ({
     pistol: {
@@ -27,21 +33,27 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
       recoilRecovery: 0.75,
       shootDelay: 150,
       position: new THREE.Vector3(0.3, -0.2, -0.5),
-      scale: 1
+      scale: 1,
+      swayAmount: 0.015,
+      bobAmount: 0.012
     },
     rifle: {
       recoilAmount: 0.15,
       recoilRecovery: 0.7,
       shootDelay: 120,
       position: new THREE.Vector3(0.2, -0.15, -0.6),
-      scale: 0.9
+      scale: 0.9,
+      swayAmount: 0.02,
+      bobAmount: 0.015
     },
     shotgun: { // Now AWP Sniper Rifle
       recoilAmount: 0.25,
       recoilRecovery: 0.6,
       shootDelay: 1200, // Much slower fire rate for the AWP
       position: new THREE.Vector3(0.2, -0.1, -0.65),
-      scale: 0.85
+      scale: 0.85,
+      swayAmount: 0.03,
+      bobAmount: 0.02
     }
   }), []);
   
@@ -168,7 +180,7 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
     };
   }, [camera, gl, onShoot, gunType, currentGun]);
 
-  // Position gun in front of camera with smooth interpolation
+  // Position gun in front of camera with realistic movement
   useFrame((state, delta) => {
     if (!group.current || !camera) return;
     
@@ -187,15 +199,67 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
       });
     }
     
-    // Calculate target position based on camera
+    // Get player movement state
+    const movementInfo = playerMovementState?.current || {
+      isMoving: false,
+      isSprinting: false,
+      isJumping: false,
+      velocityMagnitude: 0,
+      movementDirection: new THREE.Vector3(0, 0, 0),
+      lastUpdateTime: 0
+    };
+    
+    // Calculate movement-based effects (sway and bob)
+    const now = performance.now();
+    const deltaTime = (now - lastMovementTime.current) / 1000;
+    lastMovementTime.current = now;
+    
+    // Reset sway and bob offsets
+    swayOffset.current.set(0, 0, 0);
+    bobOffset.current.set(0, 0, 0);
+    
+    // Calculate weapon sway based on movement state
+    if (movementInfo.isMoving) {
+      // Calculate movement-based sway
+      const swayFactor = movementInfo.isSprinting ? 1.5 : 1.0;
+      const swaySpeed = movementInfo.isSprinting ? 4.0 : 2.5;
+      
+      bobCycle.current += deltaTime * swaySpeed * movementInfo.velocityMagnitude;
+      
+      // Horizontal sway based on movement direction
+      swayOffset.current.x = Math.sin(bobCycle.current) * currentGun.swayAmount * swayFactor;
+      
+      // Vertical bob for walking/running
+      bobOffset.current.y = Math.abs(Math.sin(bobCycle.current * 2)) * currentGun.bobAmount * swayFactor;
+    } else {
+      // Subtle idle sway when not moving
+      bobCycle.current += deltaTime * 0.8;
+      
+      swayOffset.current.x = Math.sin(bobCycle.current * 0.5) * 0.002;
+      swayOffset.current.y = Math.sin(bobCycle.current * 0.7) * 0.0015;
+    }
+    
+    // Additional effects for jumping or falling
+    if (movementInfo.isJumping) {
+      // Upward lift when initiating jump
+      if (movementInfo.lastUpdateTime - lastMovementTime.current < 300) {
+        swayOffset.current.y += 0.03;
+      }
+      
+      // Weapon sinks down when falling
+      const fallAmount = Math.min(deltaTime * 4, 0.05);
+      bobOffset.current.y -= fallAmount;
+    }
+    
+    // Calculate base position offset
     const offset = new THREE.Vector3(
-      currentGun.position.x,
-      currentGun.position.y,
+      currentGun.position.x + swayOffset.current.x,
+      currentGun.position.y + bobOffset.current.y,
       currentGun.position.z + recoil
     );
     
-    // Apply subtle breathing animation but much reduced
-    if (!shooting) {
+    // Apply subtle breathing animation (reduced when moving)
+    if (!shooting && !movementInfo.isMoving) {
       const breathAmount = Math.sin(state.clock.elapsedTime * 1.5) * 0.001;
       offset.y += breathAmount;
     }
@@ -204,13 +268,22 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
     offset.applyQuaternion(camera.quaternion);
     targetPosition.current.copy(camera.position).add(offset);
     
-    // Calculate position interpolation - smoother during large movements
-    const cameraMovementThreshold = 0.01;
-    const cameraDelta = new THREE.Vector3().subVectors(camera.position, lastCameraPosition.current);
-    const isCameraMovingFast = cameraDelta.lengthSq() > cameraMovementThreshold * cameraMovementThreshold;
+    // Calculate position interpolation factors based on player state
+    let positionLerpFactor;
     
-    // Interpolation factor - faster for small adjustments, slower for large movements
-    const positionLerpFactor = isCameraMovingFast ? Math.min(8.0 * delta, 1.0) : Math.min(12.0 * delta, 1.0);
+    if (movementInfo.isJumping) {
+      // More responsive during jumps
+      positionLerpFactor = Math.min(20.0 * delta, 1.0);
+    } else if (movementInfo.isSprinting) {
+      // More lag when sprinting (heavier movement feel)
+      positionLerpFactor = Math.min(8.0 * delta, 1.0);
+    } else if (movementInfo.isMoving) {
+      // Standard movement interpolation
+      positionLerpFactor = Math.min(12.0 * delta, 1.0);
+    } else {
+      // Very smooth when standing still
+      positionLerpFactor = Math.min(15.0 * delta, 1.0);
+    }
     
     // Smoothly interpolate position
     currentPosition.current.lerp(targetPosition.current, positionLerpFactor);
@@ -222,11 +295,24 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
       new THREE.Euler(-recoil * recoilMultiplier, 0, 0)
     );
     
-    // Interpolate rotation
-    const rotationLerpFactor = Math.min(15.0 * delta, 1.0);
+    // Base rotation from camera
     group.current.quaternion.copy(camera.quaternion);
     
-    // Apply recoil if active, otherwise use base camera rotation
+    // Apply subtle rotation based on movement (weapon tilt)
+    if (movementInfo.isMoving) {
+      // Tilt gun slightly based on movement direction
+      const tiltAmount = movementInfo.isSprinting ? 0.05 : 0.02;
+      const tiltQuaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(
+          0, 
+          0, 
+          swayOffset.current.x * 3 // Roll based on side-to-side motion
+        )
+      );
+      group.current.quaternion.multiply(tiltQuaternion);
+    }
+    
+    // Apply recoil if active
     if (recoil > 0.001) {
       group.current.quaternion.multiply(recoilQuaternion);
     }
@@ -238,7 +324,7 @@ const Gun = ({ onShoot, gunType = 'pistol' }) => {
 
   return (
     <group ref={group}>
-      {/* Use GunModel component to render the appropriate gun with memoization */}
+      {/* Use GunModel component to render the appropriate gun */}
       <GunModel gunType={gunType} scale={currentGun.scale} />
       
       {/* Muzzle flash - only visible when shooting */}
