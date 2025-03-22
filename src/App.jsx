@@ -1,10 +1,11 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { createGlobalStyle } from 'styled-components';
+import styled from 'styled-components';
 import Dashboard from './components/Dashboard';
 import Header from './components/Header';
 import Footer from './components/Footer';
-import styled from 'styled-components';
+import BalloonShooter from './games/BalloonShooter/BalloonShooter';
 
 // Global styles
 const GlobalStyle = createGlobalStyle`
@@ -83,9 +84,14 @@ const MainContent = styled.div`
 `;
 
 function App() {
-  // We'll initialize this as an empty array for now
-  // Later, when we add games, we'll populate this array
-  const games = [];
+  // Game data for the dashboard
+  const games = [
+    {
+      id: 'balloon-shooter',
+      name: 'Balloon Shooter',
+      imageUrl: '/images/balloon-shooter.png',
+    },
+  ];
 
   return (
     <Router>
@@ -94,7 +100,7 @@ function App() {
       <main>
         <Routes>
           <Route path="/" element={<Dashboard games={games} />} />
-          {/* Add game routes here later */}
+          <Route path="/game/balloon-shooter" element={<BalloonShooter />} />
           <Route path="*" element={<Dashboard games={games} />} />
         </Routes>
       </main>

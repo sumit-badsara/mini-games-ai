@@ -20,6 +20,14 @@ mini-games-ai/
 │   │   ├── Header.jsx     # Application header with navigation
 │   │   └── Footer.jsx     # Application footer
 │   ├── games/             # Individual game implementations
+│   │   └── BalloonShooter/  # 3D balloon shooter game
+│   │       ├── BalloonShooter.jsx  # Main game component
+│   │       └── components/  # Game-specific components
+│   │           ├── Balloon.jsx     # Balloon objects
+│   │           ├── GameContext.jsx # Game state management
+│   │           ├── Gun.jsx         # Gun model and controls
+│   │           ├── HUD.jsx         # Heads-up display
+│   │           └── Scene.jsx       # 3D scene setup
 │   ├── hooks/             # Custom React hooks
 │   ├── utils/             # Utility functions
 │   ├── App.jsx            # Main application component with routing
@@ -61,12 +69,28 @@ mini-games-ai/
    - Test on various device sizes
    - Use relative units (rem, %, vh/vw) instead of fixed pixel values when possible
 
+7. **3D Game Development**:
+   - Use React Three Fiber for 3D rendering
+   - Implement Minecraft-like voxel graphics with simple geometries
+   - Use Physics components for collision detection where needed
+   - Ensure proper cleanup of event listeners and animation frames
+
+## Games Implemented
+
+### Balloon Shooter
+A 3D first-person shooter game where players aim and shoot at colorful balloons:
+- **Technology**: React Three Fiber, Three.js
+- **Controls**: WASD to move, mouse to look around, left click to shoot
+- **Gameplay**: Players have 60 seconds to shoot as many balloons as possible
+- **Scoring**: Each balloon is worth 10 points
+
 ## Contribution Log
 
 - **Initial Setup**: Created README.md and cursor-usage.md to establish project documentation
 - **Dashboard Implementation**: Created a responsive dashboard that displays game tiles with a "Games coming soon" placeholder when no games are available
 - **UI Enhancements**: Added Header and Footer components, improved layout with centered content, and updated the color scheme to a more soothing palette
 - **Responsive Design**: Implemented responsive design across all components with proper breakpoints for mobile, tablet, and desktop devices, including a mobile-friendly navigation menu
+- **First Game Implementation**: Added a 3D Balloon Shooter game with Minecraft-style graphics, complete with scoring system and timer
 
 ## Troubleshooting Common Issues
 
@@ -75,6 +99,7 @@ mini-games-ai/
 - **Performance**: Optimize render cycles for game animations
 - **Browser compatibility**: Test across different browsers and devices
 - **Mobile responsiveness**: Check for touch interactions and ensure sufficient tap target sizes
+- **3D rendering performance**: Monitor frame rates and reduce complexity for lower-end devices
 
 ---
 
